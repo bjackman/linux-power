@@ -8194,6 +8194,7 @@ static struct sched_group *find_busiest_group(struct lb_env *env)
 {
 	struct sg_lb_stats *local, *busiest;
 	struct sd_lb_stats sds;
+	const char *outcome = "???";
 
 	init_sd_lb_stats(&sds);
 
@@ -8204,18 +8205,27 @@ static struct sched_group *find_busiest_group(struct lb_env *env)
 	update_sd_lb_stats(env, &sds);
 
 	if (energy_aware() && !env->dst_rq->rd->overutilized)
+	{
+		outcome = "skipped_eas";
 		goto out_balanced;
+	}
 
 	local = &sds.local_stat;
 	busiest = &sds.busiest_stat;
 
 	/* ASYM feature bypasses nice load balance check */
 	if (check_asym_packing(env, &sds))
+	{
+		outcome = "skipped_asym_packing";
 		return sds.busiest;
+	}
 
 	/* There is no busy sibling group to pull tasks from */
 	if (!sds.busiest || busiest->sum_nr_running == 0)
+	{
+		outcome = "no_busy";
 		goto out_balanced;
+	}
 
 	sds.avg_load = (SCHED_CAPACITY_SCALE * sds.total_load)
 						/ sds.total_capacity;
@@ -8226,15 +8236,22 @@ static struct sched_group *find_busiest_group(struct lb_env *env)
 	 * isn't true due to cpus_allowed constraints and the like.
 	 */
 	if (busiest->group_type == group_imbalanced)
+	{
+		outcome = "group_imbalanced";
 		goto force_balance;
+	}
 
 	/* SD_BALANCE_NEWIDLE trumps SMP nice when underutilized */
 	if (env->idle == CPU_NEWLY_IDLE && group_has_capacity(env, local) &&
 	    busiest->group_no_capacity)
+	{
+		outcome = "dunno1";
 		goto force_balance;
+	}
 
 	/* Misfitting tasks should be dealt with regardless of the avg load */
 	if (busiest->group_type == group_misfit_task) {
+		outcome = "pick_misfit";
 		goto force_balance;
 	}
 
@@ -8243,16 +8260,23 @@ static struct sched_group *find_busiest_group(struct lb_env *env)
 	 * don't try and pull any tasks.
 	 */
 	if (local->avg_load >= busiest->avg_load)
+	{
+		outcome = "local_busier";
 		goto out_balanced;
+	}
 
 	/*
 	 * Don't pull any tasks if this group is already above the domain
 	 * average load.
 	 */
 	if (local->avg_load >= sds.avg_load)
+	{
+		outcome = "local_above_sd_avg";
 		goto out_balanced;
+	}
 
 	if (env->idle == CPU_IDLE) {
+		outcome = "cpu_idle";
 		/*
 		 * This cpu is idle. If the busiest group is not overloaded
 		 * and there is no imbalance between this and busiest group
@@ -8271,17 +8295,27 @@ static struct sched_group *find_busiest_group(struct lb_env *env)
 		 */
 		if (100 * busiest->avg_load <=
 				env->sd->imbalance_pct * local->avg_load)
+		{
+			outcome = "not_imbalanced_enough";
 			goto out_balanced;
+		}
+		outcome = "found";
 	}
 
 force_balance:
 	env->busiest_group_type = busiest->group_type;
 	/* Looks like there is an imbalance. Compute it */
 	calculate_imbalance(env, &sds);
+	trace_printk("sched_find_busiest_group: force_balance=1 sd=%s outcome=%s busiest_cpus=%lx",
+		     sched_domain_name(env->sd), outcome,
+		     *cpumask_bits(sched_group_cpus(sds.busiest)));
 	return sds.busiest;
 
 out_balanced:
 	env->imbalance = 0;
+	trace_printk("sched_find_busiest_group: force_balance=0 sd=%s outcome=%s busiest_cpus=%lx",
+		     sched_domain_name(env->sd), outcome,
+		     0UL);
 	return NULL;
 }
 
@@ -8473,6 +8507,9 @@ static int load_balance(int this_cpu, struct rq *this_rq,
 	 */
 	if (idle == CPU_NEWLY_IDLE)
 		env.dst_grpmask = NULL;
+
+	trace_printk("sched_load_balance: sd=%s idle=%d\n",
+		     sched_domain_name(sd), idle);
 
 	cpumask_copy(cpus, cpu_active_mask);
 

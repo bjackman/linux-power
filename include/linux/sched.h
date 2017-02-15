@@ -1197,6 +1197,12 @@ struct sched_domain {
 	unsigned long span[0];
 };
 
+#ifdef CONFIG_SCHED_DEBUG
+#define sched_domain_name(sd) ((sd)->name)
+#else
+#define sched_domain_name(sd) "<sd>"
+#endif
+
 static inline struct cpumask *sched_domain_span(struct sched_domain *sd)
 {
 	return to_cpumask(sd->span);
