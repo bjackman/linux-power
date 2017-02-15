@@ -7780,10 +7780,20 @@ static bool update_sd_pick_busiest(struct lb_env *env,
 	struct sg_lb_stats *busiest = &sds->busiest_stat;
 
 	if (sgs->group_type > busiest->group_type)
+	{
+		trace_printk("pick_busiest: candidate_group=%lx local_group=%lx outcome=picked_gtype",
+			     *cpumask_bits(sched_group_cpus(sg)),
+			     *cpumask_bits(sched_group_cpus(sds->local)));
 		return true;
+	}
 
 	if (sgs->group_type < busiest->group_type)
+	{
+		trace_printk("pick_busiest: candidate_group=%lx local_group=%lx outcome=ignored_gtype",
+			     *cpumask_bits(sched_group_cpus(sg)),
+			     *cpumask_bits(sched_group_cpus(sds->local)));
 		return false;
+	}
 
 	/*
 	 * Candidate sg doesn't face any serious load-balance problems
@@ -7791,10 +7801,20 @@ static bool update_sd_pick_busiest(struct lb_env *env,
 	 */
 	if (sgs->group_type == group_other &&
 	    !group_has_capacity(env, &sds->local_stat))
+	{
+		trace_printk("pick_busiest: candidate_group=%lx local_group=%lx outcome=ignored_misfit1",
+			     *cpumask_bits(sched_group_cpus(sg)),
+			     *cpumask_bits(sched_group_cpus(sds->local)));
 		return false;
+	}
 
 	if (sgs->avg_load <= busiest->avg_load)
+	{
+		trace_printk("pick_busiest: candidate_group=%lx local_group=%lx outcome=ignored_avg_load",
+			     *cpumask_bits(sched_group_cpus(sg)),
+			     *cpumask_bits(sched_group_cpus(sds->local)));
 		return false;
+	}
 
 	if (!(env->sd->flags & SD_ASYM_CPUCAPACITY))
 		goto asym_packing;
@@ -7807,16 +7827,31 @@ static bool update_sd_pick_busiest(struct lb_env *env,
 	 */
 	if (sgs->sum_nr_running <= sgs->group_weight &&
 	    group_smaller_cpu_capacity(sds->local, sg))
+	{
+		trace_printk("pick_busiest: candidate_group=%lx local_group=%lx outcome=ignored_misfit2",
+			     *cpumask_bits(sched_group_cpus(sg)),
+			     *cpumask_bits(sched_group_cpus(sds->local)));
 		return false;
+	}
 
 asym_packing:
 	/* This is the busiest node in its class. */
 	if (!(env->sd->flags & SD_ASYM_PACKING))
+	{
+		trace_printk("pick_busiest: candidate_group=%lx local_group=%lx outcome=picked_asym",
+			     *cpumask_bits(sched_group_cpus(sg)),
+			     *cpumask_bits(sched_group_cpus(sds->local)));
 		return true;
+	}
 
 	/* No ASYM_PACKING if target cpu is already busy */
 	if (env->idle == CPU_NOT_IDLE)
+	{
+		trace_printk("pick_busiest: candidate_group=%lx local_group=%lx outcome=picked_notidle",
+			     *cpumask_bits(sched_group_cpus(sg)),
+			     *cpumask_bits(sched_group_cpus(sds->local)));
 		return true;
+	}
 	/*
 	 * ASYM_PACKING needs to move all the work to the highest
 	 * prority CPUs in the group, therefore mark all groups
@@ -7825,14 +7860,27 @@ asym_packing:
 	if (sgs->sum_nr_running &&
 	    sched_asym_prefer(env->dst_cpu, sg->asym_prefer_cpu)) {
 		if (!sds->busiest)
+		{
+			trace_printk("pick_busiest: candidate_group=%lx local_group=%lx outcome=picked_asym",
+				     *cpumask_bits(sched_group_cpus(sg)),
+				     *cpumask_bits(sched_group_cpus(sds->local)));
 			return true;
+		}
 
 		/* Prefer to move from lowest priority cpu's work */
 		if (sched_asym_prefer(sds->busiest->asym_prefer_cpu,
 				      sg->asym_prefer_cpu))
+		{
+			trace_printk("pick_busiest: candidate_group=%lx local_group=%lx outcome=picked_asym",
+				     *cpumask_bits(sched_group_cpus(sg)),
+				     *cpumask_bits(sched_group_cpus(sds->local)));
 			return true;
+		}
 	}
 
+	trace_printk("pick_busiest: candidate_group=%lx local_group=%lx outcome=ignored",
+		     *cpumask_bits(sched_group_cpus(sg)),
+		     *cpumask_bits(sched_group_cpus(sds->local)));
 	return false;
 }
 
