@@ -274,6 +274,7 @@ static int cpufreq_init(struct cpufreq_policy *policy)
 		transition_latency = CPUFREQ_ETERNAL;
 
 	policy->cpuinfo.transition_latency = transition_latency;
+	policy->rate_limit_us = transition_latency;
 
 	return 0;
 
