@@ -473,7 +473,6 @@ static int sugov_init(struct cpufreq_policy *policy)
 {
 	struct sugov_policy *sg_policy;
 	struct sugov_tunables *tunables;
-	unsigned int lat;
 	int ret = 0;
 
 	/* State should be equivalent to EXIT */
@@ -513,9 +512,14 @@ static int sugov_init(struct cpufreq_policy *policy)
 	}
 
 	tunables->rate_limit_us = LATENCY_MULTIPLIER;
-	lat = policy->cpuinfo.transition_latency / NSEC_PER_USEC;
-	if (lat)
+	if (policy->rate_limit_us) {
+		tunables->rate_limit_us = policy->rate_limit_us;
+	} else if (policy->cpuinfo.transition_latency) {
+		unsigned int lat;
+
+		lat = policy->cpuinfo.transition_latency / NSEC_PER_USEC;
 		tunables->rate_limit_us *= lat;
+	}
 
 	policy->governor_data = sg_policy;
 	sg_policy->tunables = tunables;
