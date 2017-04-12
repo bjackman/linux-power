@@ -6738,6 +6738,11 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int sd_flag, int wake_f
 	}
 	rcu_read_unlock();
 
+#ifdef CONFIG_NO_HZ_COMMON
+        if (nohz_kick_needed(cpu_rq(new_cpu), true))
+		nohz_balancer_kick(true);
+#endif
+
 	return new_cpu;
 }
 
@@ -9384,6 +9389,7 @@ static struct {
 	cpumask_var_t idle_cpus_mask;
 	atomic_t nr_cpus;
 	unsigned long next_balance;     /* in jiffy units */
+	unsigned long next_update;     /* in jiffy units */
 } nohz ____cacheline_aligned;
 
 static inline int find_new_ilb(void)
@@ -9401,7 +9407,7 @@ static inline int find_new_ilb(void)
  * nohz_load_balancer CPU (if there is one) otherwise fallback to any idle
  * CPU (if there is one).
  */
-static void nohz_balancer_kick(void)
+static void nohz_balancer_kick(bool only_update)
 {
 	int ilb_cpu;
 
@@ -9414,6 +9420,11 @@ static void nohz_balancer_kick(void)
 
 	if (test_and_set_bit(NOHZ_BALANCE_KICK, nohz_flags(ilb_cpu)))
 		return;
+
+	if (only_update)
+               set_bit(NOHZ_STATS_KICK, nohz_flags(ilb_cpu));
+
+	trace_printk("nohz_kick: ilb_cpu=%d only_update=%d", ilb_cpu, only_update);
 	/*
 	 * Use smp_send_reschedule() instead of resched_cpu().
 	 * This way we generate a sched IPI on the target cpu which
@@ -9509,6 +9520,8 @@ static int sched_ilb_notifier(struct notifier_block *nfb,
 		return NOTIFY_DONE;
 	}
 }
+#else
+static inline void nohz_balancer_kick(bool only_update) {}
 #endif
 
 static DEFINE_SPINLOCK(balancing);
@@ -9541,6 +9554,17 @@ static void rebalance_domains(struct rq *rq, enum cpu_idle_type idle)
 	u64 max_cost = 0;
 
 	update_blocked_averages(cpu);
+
+#ifdef CONFIG_NO_HZ_COMMON
+	if ((idle == CPU_MAX_IDLE_TYPES) ||
+			test_bit(NOHZ_STATS_KICK, nohz_flags(cpu))) {
+		/*
+		 * We only want to update blocked load and shares which has
+		 * just been done above
+		 */
+		return;
+	}
+#endif
 
 	rcu_read_lock();
 	for_each_domain(cpu, sd) {
@@ -9640,6 +9664,7 @@ static void nohz_idle_balance(struct rq *this_rq, enum cpu_idle_type idle)
 {
 	int this_cpu = this_rq->cpu;
 	struct rq *rq;
+	struct sched_domain *sd;
 	int balance_cpu;
 	/* Earliest time when we have to do rebalance again */
 	unsigned long next_balance = jiffies + 60*HZ;
@@ -9648,6 +9673,32 @@ static void nohz_idle_balance(struct rq *this_rq, enum cpu_idle_type idle)
 	if (idle != CPU_IDLE ||
 	    !test_bit(NOHZ_BALANCE_KICK, nohz_flags(this_cpu)))
 		goto end;
+
+	/*
+	 * This cpu is going to update the blocked load of idle CPUs either
+	 * before doing a rebalancing or just to keep metrics up to date. we
+	 * can safely update the next update timestamp
+	 */
+	rcu_read_lock();
+	sd = rcu_dereference(*this_cpu_ptr(&sd_llc));
+	/*
+	 * Check whether there is a sched_domain available for this cpu.
+	 * The last other cpu can have been unplugged since the ILB has been
+	 * trigerred and the sched_domain can now be null. The idle balance
+	 * sequence will quickly be aborted as there is no more idle CPUs
+	 */
+	if (sd)
+		nohz.next_update = jiffies + get_sd_balance_interval(sd, true)/4;
+	rcu_read_unlock();
+
+	/*
+	 * This idle load balance softirq has been triggered only to update the
+	 * blocked load and shares of ilde CPUs. Set the idle state to an
+	 * undefined state to the load balance will be aborted just after the
+	 * update of blocked load
+	 */
+	if (test_bit(NOHZ_STATS_KICK, nohz_flags(this_cpu)))
+		idle = CPU_MAX_IDLE_TYPES;
 
 	for_each_cpu(balance_cpu, nohz.idle_cpus_mask) {
 		if (balance_cpu == this_cpu || !idle_cpu(balance_cpu))
@@ -9703,7 +9754,7 @@ end:
  *   - For SD_ASYM_PACKING, if the lower numbered cpu's in the scheduler
  *     domain span are idle.
  */
-static inline bool nohz_kick_needed(struct rq *rq)
+static inline bool nohz_kick_needed(struct rq *rq, bool only_update)
 {
 	unsigned long now = jiffies;
 	struct sched_domain *sd;
@@ -9711,7 +9762,7 @@ static inline bool nohz_kick_needed(struct rq *rq)
 	int nr_busy, cpu = rq->cpu;
 	bool kick = false;
 
-	if (unlikely(rq->idle_balance))
+	if (unlikely(rq->idle_balance) && !only_update)
 		return false;
 
        /*
@@ -9727,6 +9778,13 @@ static inline bool nohz_kick_needed(struct rq *rq)
 	 */
 	if (likely(!atomic_read(&nohz.nr_cpus)))
 		return false;
+
+	if (only_update) {
+		if (time_before(now, nohz.next_update))
+			return false;
+		else
+			return true;
+	}
 
 	if (time_before(now, nohz.next_balance))
 		return false;
@@ -9774,6 +9832,7 @@ unlock:
 }
 #else
 static void nohz_idle_balance(struct rq *this_rq, enum cpu_idle_type idle) { }
+static inline bool nohz_kick_needed(struct rq *rq, bool only_update) { return false; }
 #endif
 
 /*
@@ -9796,6 +9855,9 @@ static void run_rebalance_domains(struct softirq_action *h)
 	 */
 	nohz_idle_balance(this_rq, idle);
 	rebalance_domains(this_rq, idle);
+#ifdef CONFIG_NO_HZ_COMMON
+	clear_bit(NOHZ_STATS_KICK, nohz_flags(this_rq->cpu));
+#endif
 }
 
 /*
@@ -9810,8 +9872,8 @@ void trigger_load_balance(struct rq *rq)
 	if (time_after_eq(jiffies, rq->next_balance))
 		raise_softirq(SCHED_SOFTIRQ);
 #ifdef CONFIG_NO_HZ_COMMON
-	if (nohz_kick_needed(rq))
-		nohz_balancer_kick();
+	if (nohz_kick_needed(rq, false))
+		nohz_balancer_kick(false);
 #endif
 }
 
@@ -10379,6 +10441,7 @@ __init void init_sched_fair_class(void)
 
 #ifdef CONFIG_NO_HZ_COMMON
 	nohz.next_balance = jiffies;
+	nohz.next_update = jiffies;
 	zalloc_cpumask_var(&nohz.idle_cpus_mask, GFP_NOWAIT);
 	cpu_notifier(sched_ilb_notifier, 0);
 #endif
