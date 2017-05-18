@@ -278,8 +278,14 @@ static int init_rootdomain(struct root_domain *rd)
 
 	if (cpupri_init(&rd->cpupri) != 0)
 		goto free_cpudl;
+
+	if (!alloc_cpumask_var(&rd->max_cap_cpus, GFP_KERNEL))
+		goto free_cpupri;
+
 	return 0;
 
+free_cpupri:
+	cpupri_cleanup(&rd->cpupri);
 free_cpudl:
 	cpudl_cleanup(&rd->cpudl);
 free_rto_mask:
@@ -391,6 +397,7 @@ DEFINE_PER_CPU(int, sd_llc_id);
 DEFINE_PER_CPU(struct sched_domain_shared *, sd_llc_shared);
 DEFINE_PER_CPU(struct sched_domain *, sd_numa);
 DEFINE_PER_CPU(struct sched_domain *, sd_asym);
+DEFINE_PER_CPU(struct sched_domain *, sd_asym_cpucapacity);
 
 static void update_top_cache_domain(int cpu)
 {
@@ -416,6 +423,9 @@ static void update_top_cache_domain(int cpu)
 
 	sd = highest_flag_domain(cpu, SD_ASYM_PACKING);
 	rcu_assign_pointer(per_cpu(sd_asym, cpu), sd);
+
+	sd = lowest_flag_domain(cpu, SD_ASYM_CPUCAPACITY);
+	rcu_assign_pointer(per_cpu(sd_asym_cpucapacity, cpu), sd);
 }
 
 /*
@@ -1694,6 +1704,23 @@ build_sched_domains(const struct cpumask *cpu_map, struct sched_domain_attr *att
 			WRITE_ONCE(d.rd->max_cpu_capacity, rq->cpu_capacity_orig);
 
 		cpu_attach_domain(sd, d.rd, i);
+	}
+	/*
+	 * Set up a mask of the CPUs with the maximum capacity. If we don't have
+	 * asymmetrical capacity then this is just all CPUs. We don't care about
+	 * who's online, the user is going to mask it anyway.
+	 *
+	 * Assume that if any CPU has sd_asym_cpucapacity then CPU 0 does too.
+	 */
+	if (rcu_dereference(per_cpu(sd_asym_cpucapacity, 0))) {
+		unsigned long max_cap = READ_ONCE(d.rd->max_cpu_capacity);
+		for_each_cpu(i, cpu_map) {
+			rq = cpu_rq(i);
+			if (rq->cpu_capacity_orig == max_cap)
+				cpumask_set_cpu(i, d.rd->max_cap_cpus);
+		}
+	} else {
+		cpumask_setall(d.rd->max_cap_cpus);
 	}
 	rcu_read_unlock();
 

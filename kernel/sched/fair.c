@@ -8963,6 +8963,27 @@ static inline bool nohz_kick_needed(struct rq *rq)
 			}
 		}
 	}
+
+	sd = rcu_dereference(per_cpu(sd_asym_cpucapacity, cpu));
+	if (sd && rq->misfit_task) {
+		/*
+		 * TODO need to make sure we can reuse load_balance_mask
+		 * Can't really see how we could end up racing with load_balance
+		 * itself here, but I don't think we've actually taken any locks
+		 * yet :/
+		 */
+		struct cpumask *cpus = this_cpu_cpumask_var_ptr(load_balance_mask);
+
+		WARN_ON(!(sd->flags & SD_ASYM_CPUCAPACITY));
+		cpumask_and(cpus, nohz.idle_cpus_mask, rq->rd->max_cap_cpus);
+		cpumask_and(cpus, cpus, sched_domain_span(sd));
+
+		if (!cpumask_empty(cpus)) {
+			kick = true;
+			goto unlock;
+		}
+	}
+
 unlock:
 	rcu_read_unlock();
 	return kick;

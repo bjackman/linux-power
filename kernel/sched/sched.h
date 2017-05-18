@@ -647,6 +647,7 @@ struct root_domain {
 	cpumask_var_t rto_mask;
 	struct cpupri cpupri;
 
+	cpumask_var_t max_cap_cpus;
 	unsigned long max_cpu_capacity;
 };
 
@@ -1059,6 +1060,7 @@ DECLARE_PER_CPU(int, sd_llc_id);
 DECLARE_PER_CPU(struct sched_domain_shared *, sd_llc_shared);
 DECLARE_PER_CPU(struct sched_domain *, sd_numa);
 DECLARE_PER_CPU(struct sched_domain *, sd_asym);
+DECLARE_PER_CPU(struct sched_domain *, sd_asym_cpucapacity);
 
 struct sched_group_capacity {
 	atomic_t ref;
