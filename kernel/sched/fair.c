@@ -6288,6 +6288,7 @@ again:
 		hrtick_start_fair(rq, p);
 
 	rq->misfit_task = !task_fits_capacity(p, capacity_of(rq->cpu));
+	trace_printk("sched_misfit_task: cpu=%d misfit_task=%d", cpu_of(rq), rq->misfit_task);
 
 	return p;
 simple:
@@ -6311,11 +6312,13 @@ simple:
 		hrtick_start_fair(rq, p);
 
 	rq->misfit_task = !task_fits_capacity(p, capacity_of(rq->cpu));
+	trace_printk("sched_misfit_task: cpu=%d misfit_task=%d", cpu_of(rq), rq->misfit_task);
 
 	return p;
 
 idle:
 	rq->misfit_task = 0;
+	trace_printk("sched_misfit_task: cpu=%d misfit_task=%d", cpu_of(rq), rq->misfit_task);
 	new_tasks = idle_balance(rq, rf);
 
 	/*
@@ -7420,8 +7423,10 @@ static inline void update_sg_lb_stats(struct lb_env *env,
 			sgs->idle_cpus++;
 
 		if (env->sd->flags & SD_ASYM_CPUCAPACITY &&
-		    !sgs->group_misfit_task && rq->misfit_task)
+		    !sgs->group_misfit_task && rq->misfit_task) {
+			trace_printk("lb_found_misfit_task: cpu=%d", i);
 			sgs->group_misfit_task = capacity_of(i);
+		}
 	}
 
 	/* Adjust by relative CPU capacity of the group */
@@ -9078,6 +9083,7 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
 		task_tick_numa(rq, curr);
 
 	rq->misfit_task = !task_fits_capacity(curr, capacity_of(rq->cpu));
+	trace_printk("sched_misfit_task: cpu=%d misfit_task=%d", cpu_of(rq), rq->misfit_task);
 }
 
 /*
