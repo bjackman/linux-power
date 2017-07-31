@@ -1211,6 +1211,11 @@ sd_init(struct sched_domain_topology_level *tl,
 	return sd;
 }
 
+static int cpu_die_flags(void)
+{
+	return SD_ASYM_CPUCAPACITY;
+}
+
 /*
  * Topology list, bottom-up.
  */
@@ -1221,7 +1226,7 @@ static struct sched_domain_topology_level default_topology[] = {
 #ifdef CONFIG_SCHED_MC
 	{ cpu_coregroup_mask, cpu_core_flags, SD_INIT_NAME(MC) },
 #endif
-	{ cpu_cpu_mask, SD_INIT_NAME(DIE) },
+	{ cpu_cpu_mask, cpu_die_flags, SD_INIT_NAME(DIE) },
 	{ NULL, },
 };
 
