@@ -7363,6 +7363,11 @@ static inline enum
 group_type group_classify(struct sched_group *group,
 			  struct sg_lb_stats *sgs)
 {
+	trace_printk("sched_group_classify: group=0x%lx group_no_capacity=%d "
+		     "sg_imabalanced=%d group_misfit_task=%d",
+		     *cpumask_bits(sched_group_span(group)),
+		     sgs->group_no_capacity, sg_imbalanced(group), sgs->group_misfit_task);
+
 	if (sgs->group_no_capacity)
 		return group_overloaded;
 
@@ -7467,8 +7472,12 @@ static bool update_sd_pick_busiest(struct lb_env *env,
 	 */
 	if (sgs->group_type == group_misfit_task &&
 	    (!group_smaller_cpu_capacity(sg, sds->local) ||
-	     !group_has_capacity(env, &sds->local_stat)))
+	     !group_has_capacity(env, &sds->local_stat))) {
+		trace_printk("min_cap=%lu cap_margin=%u local_min_cap=%lu",
+			     sg->sgc->min_capacity, capacity_margin, sds->local->sgc->min_capacity);
+		trace_printk("usp: can't help misfit");
 		return false;
+	}
 
 	if (sgs->group_type > busiest->group_type)
 		return true;
@@ -7869,11 +7878,15 @@ static struct sched_group *find_busiest_group(struct lb_env *env)
 		return sds.busiest;
 
 	/* There is no busy sibling group to pull tasks from */
-	if (!sds.busiest || busiest->sum_nr_running == 0)
+	if (!sds.busiest || busiest->sum_nr_running == 0) {
+		trace_printk("FBG No busiest");
 		goto out_balanced;
+	}
 
 	sds.avg_load = (SCHED_CAPACITY_SCALE * sds.total_load)
 						/ sds.total_capacity;
+
+	trace_printk("busiest group type %d", busiest->group_type);
 
 	/*
 	 * If the busiest group is imbalanced the below checks don't
@@ -7896,15 +7909,19 @@ static struct sched_group *find_busiest_group(struct lb_env *env)
 	 * If the local group is busier than the selected busiest group
 	 * don't try and pull any tasks.
 	 */
-	if (local->avg_load >= busiest->avg_load)
+	if (local->avg_load >= busiest->avg_load) {
+		trace_printk("avg_load!");
 		goto out_balanced;
+	}
 
 	/*
 	 * Don't pull any tasks if this group is already above the domain
 	 * average load.
 	 */
-	if (local->avg_load >= sds.avg_load)
+	if (local->avg_load >= sds.avg_load) {
+		trace_printk("avg_load2!");
 		goto out_balanced;
+	}
 
 	if (env->idle == CPU_IDLE) {
 		/*
@@ -7934,6 +7951,7 @@ force_balance:
 	return sds.busiest;
 
 out_balanced:
+	trace_printk("out_balanced");
 	env->imbalance = 0;
 	return NULL;
 }
@@ -8127,20 +8145,24 @@ static int load_balance(int this_cpu, struct rq *this_rq,
 
 	schedstat_inc(sd->lb_count[idle]);
 
+	trace_printk("sched_load_balance: dst_cpu=%d sd=%s", this_cpu, sd->name);
 redo:
 	if (!should_we_balance(&env)) {
+		trace_printk("no should_we_balance");
 		*continue_balancing = 0;
 		goto out_balanced;
 	}
 
 	group = find_busiest_group(&env);
 	if (!group) {
+		trace_printk("no group");
 		schedstat_inc(sd->lb_nobusyg[idle]);
 		goto out_balanced;
 	}
 
 	busiest = find_busiest_queue(&env, group);
 	if (!busiest) {
+		trace_printk("no queue");
 		schedstat_inc(sd->lb_nobusyq[idle]);
 		goto out_balanced;
 	}
@@ -8154,6 +8176,7 @@ redo:
 
 	ld_moved = 0;
 	if (busiest->nr_running > 1) {
+		trace_printk("nr_running > 1");
 		/*
 		 * Attempt to move tasks. If find_busiest_group has found
 		 * an imbalance but busiest->nr_running <= 1, the group is
@@ -8276,6 +8299,8 @@ more_balance:
 		if (need_active_balance(&env)) {
 			unsigned long flags;
 
+			trace_printk("Do need_active_balance");
+
 			raw_spin_lock_irqsave(&busiest->lock, flags);
 
 			/* don't kick the active_load_balance_cpu_stop,
@@ -8309,6 +8334,8 @@ more_balance:
 
 			/* We've kicked active balancing, force task migration. */
 			sd->nr_balance_failed = sd->cache_nice_tries+1;
+		} else {
+			trace_printk("Do not need active balance");
 		}
 	} else
 		sd->nr_balance_failed = 0;
@@ -8425,6 +8452,9 @@ static int idle_balance(struct rq *this_rq, struct rq_flags *rf)
 			update_next_balance(sd, &next_balance);
 		rcu_read_unlock();
 
+		trace_printk("skip_idle_balance: avg_idle_%llu cost=%u overload=%d",
+			     this_rq->avg_idle, sysctl_sched_migration_cost, this_rq->rd->overload);
+
 		goto out;
 	}
 
@@ -8440,6 +8470,7 @@ static int idle_balance(struct rq *this_rq, struct rq_flags *rf)
 			continue;
 
 		if (this_rq->avg_idle < curr_cost + sd->max_newidle_lb_cost) {
+			trace_printk("skip idle_balance on %s", sd->name);
 			update_next_balance(sd, &next_balance);
 			break;
 		}
