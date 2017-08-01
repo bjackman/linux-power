@@ -8606,6 +8606,7 @@ static int active_load_balance_cpu_stop(void *data)
 
 		p = detach_one_task(&env);
 		if (p) {
+			p->last_balance_ts = jiffies;
 			schedstat_inc(sd->alb_pushed);
 			/* Active balancing done, reset the failure counter. */
 			sd->nr_balance_failed = 0;
