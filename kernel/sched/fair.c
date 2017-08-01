@@ -5857,14 +5857,6 @@ static inline int task_fits_capacity(struct task_struct *p, long capacity)
 	return capacity * 1024 > task_util(p) * capacity_margin;
 }
 
-static bool cpu_overutilized_wake(int cpu, struct task_struct *p)
-{
-	trace_printk("cow: comm=%s pid=%d cpu=%d cap=%lu cpu_util=%d cpu_util_wake=%d",
-		     p->comm, p->pid, cpu, capacity_of(cpu), cpu_util(cpu), cpu_util_wake(cpu, p));
-
-	return (capacity_of(cpu) * 1024) < (cpu_util_wake(cpu, p) * capacity_margin);
-}
-
 /*
  * Disable WAKE_AFFINE in the case where task @p doesn't fit in the
  * capacity of either the waking CPU @cpu or the previous CPU @prev_cpu.
@@ -5876,20 +5868,15 @@ static int wake_cap(struct task_struct *p, int cpu, int prev_cpu)
 {
 	long min_cap, max_cap;
 
-	/* Bring task utilization in sync with prev_cpu */
-	sync_entity_load_avg(&p->se);
-
-	if (cpu_overutilized_wake(cpu, p) && cpu_overutilized_wake(prev_cpu, p)) {
-		trace_printk("wake cap for overutilized");
-		return 1;
-	}
-
 	min_cap = min(capacity_orig_of(prev_cpu), capacity_orig_of(cpu));
 	max_cap = cpu_rq(cpu)->rd->max_cpu_capacity;
 
 	/* Minimum capacity is close to max, no need to abort wake_affine */
 	if (max_cap - min_cap < max_cap >> 3)
 		return 0;
+
+	/* Bring task utilization in sync with prev_cpu */
+	sync_entity_load_avg(&p->se);
 
 	return task_fits_capacity(p, min_cap);
 }
