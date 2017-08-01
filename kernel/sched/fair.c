@@ -5359,8 +5359,10 @@ static int wake_wide(struct task_struct *p)
 	 * it question its purpose in life and give it anxiety and self worth
 	 * issues, and nobody wants that.
 	 */
-	if (time_before(jiffies, p->last_balance_ts + HZ))
+	if (time_before(jiffies, p->last_balance_ts + HZ)) {
+		trace_printk("wake wide due to last_balance_ts");
 		return 1;
+	}
 
 	if (master < slave)
 		swap(master, slave);
@@ -5463,8 +5465,11 @@ find_idlest_group(struct sched_domain *sd, struct task_struct *p,
 
 			spare_cap = capacity_spare_wake(i, p);
 
-			if (spare_cap > max_spare_cap)
+			if (spare_cap > max_spare_cap) {
+				trace_printk("New max_spare_cap cpu%d (%lu)",
+					     i, spare_cap);
 				max_spare_cap = spare_cap;
+			}
 		}
 
 		/* Adjust by relative CPU capacity of the group */
@@ -5518,22 +5523,36 @@ find_idlest_group(struct sched_domain *sd, struct task_struct *p,
 		goto skip_spare;
 
 	if (this_spare > task_util(p) / 2 &&
-	    imbalance_scale*this_spare > 100*most_spare)
+	    imbalance_scale*this_spare > 100*most_spare) {
+		trace_printk("im_idlest: this_spare=%lu imbalance_scale=%d most_spare=%lu most_spare_sg=%lx",
+			     this_spare, imbalance_scale, most_spare,
+			     most_spare_sg ? *cpumask_bits(sched_group_span(most_spare_sg)) : 0);
 		return NULL;
+	}
 
-	if (most_spare > task_util(p) / 2)
+	if (most_spare > task_util(p) / 2) {
+		trace_printk("returning most_spare_sg");
 		return most_spare_sg;
+	}
 
 skip_spare:
-	if (!idlest)
+	if (!idlest) {
+		trace_printk("no idlest");
 		return NULL;
+	}
 
-	if (min_runnable_load > (this_runnable_load + imbalance))
+	if (min_runnable_load > (this_runnable_load + imbalance)) {
+		trace_printk("this_runnable_load");
 		return NULL;
+	}
 
 	if ((this_runnable_load < (min_runnable_load + imbalance)) &&
-	     (100*this_avg_load < imbalance_scale*min_avg_load))
+	    (100*this_avg_load < imbalance_scale*min_avg_load)) {
+		trace_printk("avg_load");
 		return NULL;
+	}
+
+	trace_printk("idlest base");
 
 	return idlest;
 }
@@ -5939,6 +5958,10 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int sd_flag, int wake_f
 			break;
 	}
 
+	trace_printk("sched_strf: pid=%d comm=%s this_cpu=%d prev_cpu=%d want_affine=%d "
+		     "affine_sd=%s sd=%s", p->pid, p->comm, cpu, prev_cpu, want_affine,
+		     affine_sd ? affine_sd->name : "(null)", sd ? sd->name : "(null)");
+
 	if (affine_sd) {
 		sd = NULL; /* Prefer wake_affine over balance flags */
 		if (cpu == prev_cpu)
@@ -5957,6 +5980,8 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int sd_flag, int wake_f
 		struct sched_group *group;
 		int weight;
 
+		trace_printk("strf_slow: cpu=%d sd=%s", cpu, sd->name);
+
 		if (!(sd->flags & sd_flag)) {
 			sd = sd->child;
 			continue;
@@ -5964,16 +5989,23 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int sd_flag, int wake_f
 
 		group = find_idlest_group(sd, p, cpu, sd_flag);
 		if (!group) {
+			trace_printk("no idlest group");
 			sd = sd->child;
 			continue;
 		}
+		trace_printk("idlest_group: cpu=%d sd=%s group=%lx",
+			     cpu, sd->name, *cpumask_bits(sched_group_span(group)));
 
 		new_cpu = find_idlest_cpu(group, p, cpu);
 		if (new_cpu == -1 || new_cpu == cpu) {
+			trace_printk("bad_idlest_cpu: this_cpu=%d sd=%s new_cpu=%d",
+				     cpu, sd->name, new_cpu);
 			/* Now try balancing at a lower domain level of cpu */
 			sd = sd->child;
 			continue;
 		}
+		trace_printk("idlest_group: cpu=%d sd=%s new_cpu=%d",
+			     cpu, sd->name, new_cpu);
 
 		/* Now try balancing at a lower domain level of new_cpu */
 		cpu = new_cpu;
@@ -6843,6 +6875,8 @@ static int detach_tasks(struct lb_env *env)
 
 		detach_task(p, env);
 		p->last_balance_ts = jiffies;
+		trace_printk("last_balance_ts: pid=%d comm=%s jiffies=%lu",
+			     p->pid, p->comm, p->last_balance_ts);
 		list_add(&p->se.group_node, &env->tasks);
 
 		detached++;
@@ -8607,6 +8641,8 @@ static int active_load_balance_cpu_stop(void *data)
 		p = detach_one_task(&env);
 		if (p) {
 			p->last_balance_ts = jiffies;
+			trace_printk("last_balance_ts: pid=%d comm=%s jiffies=%lu",
+				     p->pid, p->comm, p->last_balance_ts);
 			schedstat_inc(sd->alb_pushed);
 			/* Active balancing done, reset the failure counter. */
 			sd->nr_balance_failed = 0;
