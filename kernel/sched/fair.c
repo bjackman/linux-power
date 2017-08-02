@@ -5472,6 +5472,13 @@ find_idlest_group(struct sched_domain *sd, struct task_struct *p,
 			}
 		}
 
+		trace_printk("fig_load: group=%lx base_avg_load=%lu base_runnable_load=%lu "
+			     "capacity=%lu avg_load=%lu runnable_load=%lu",
+			     *cpumask_bits(sched_group_span(group)), avg_load, runnable_load,
+			     group->sgc->capacity,
+			     (avg_load * SCHED_CAPACITY_SCALE) / group->sgc->capacity,
+			     (runnable_load * SCHED_CAPACITY_SCALE) / group->sgc->capacity);
+
 		/* Adjust by relative CPU capacity of the group */
 		avg_load = (avg_load * SCHED_CAPACITY_SCALE) /
 					group->sgc->capacity;
