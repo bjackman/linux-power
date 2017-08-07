@@ -5556,10 +5556,10 @@ skip_spare:
 }
 
 /*
- * find_idlest_cpu - find the idlest cpu among the cpus
+ * find_idlest_cpu - find the idlest cpu among the cpus in group.
  */
 static int
-find_idlest_cpu(struct cpumask *cpus, struct task_struct *p, int this_cpu)
+find_idlest_cpu(struct sched_group *group, struct task_struct *p, int this_cpu)
 {
 	unsigned long load, min_load = ULONG_MAX;
 	unsigned int min_exit_latency = UINT_MAX;
@@ -5569,11 +5569,11 @@ find_idlest_cpu(struct cpumask *cpus, struct task_struct *p, int this_cpu)
 	int i;
 
 	/* Check if we have any choice: */
-	if (cpumask_weight(cpus) == 1)
-		return cpumask_first(cpus);
+	if (group->group_weight == 1)
+		return cpumask_first(sched_group_span(group));
 
 	/* Traverse only the allowed CPUs */
-	for_each_cpu_and(i, cpus, &p->cpus_allowed) {
+	for_each_cpu_and(i, sched_group_span(group), &p->cpus_allowed) {
 		if (idle_cpu(i)) {
 			struct rq *rq = cpu_rq(i);
 			struct cpuidle_state *idle = idle_get_state(rq);
@@ -5985,10 +5985,8 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int sd_flag, int wake_f
 			new_cpu = select_idle_sibling(p, prev_cpu, new_cpu);
 
 	} else while (sd) {
+		struct sched_group *group;
 		int weight;
-		struct cpumask *cpus;
-
-		cpus = sched_domain_span(sd);
 
 		trace_printk("strf_slow: cpu=%d sd=%s", cpu, sd->name);
 
@@ -5997,21 +5995,17 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int sd_flag, int wake_f
 			continue;
 		}
 
-		if (sd->child) {
-			struct sched_group *group = find_idlest_group(
-							sd, p, cpu, sd_flag);
-			if (!group) {
-				new_cpu = cpu;
-				trace_printk("no idlest group");
-				sd = sd->child;
-				continue;
-			}
-			cpus = sched_group_span(group);
+		group = find_idlest_group(sd, p, cpu, sd_flag);
+		if (!group) {
+			new_cpu = cpu;
+			trace_printk("no idlest group");
+			sd = sd->child;
+			continue;
 		}
-		trace_printk("idlest_group: cpu=%d sd=%s cpus=%lx",
-			     cpu, sd->name, *cpumask_bits(cpus));
+		trace_printk("idlest_group: cpu=%d sd=%s group=%lx",
+			     cpu, sd->name, *cpumask_bits(sched_group_span(group)));
 
-		new_cpu = find_idlest_cpu(cpus, p, cpu);
+		new_cpu = find_idlest_cpu(group, p, cpu);
 		if (new_cpu == cpu) {
 			trace_printk("bad_idlest_cpu: this_cpu=%d sd=%s new_cpu=%d",
 				     cpu, sd->name, new_cpu);
