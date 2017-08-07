@@ -5352,18 +5352,6 @@ static int wake_wide(struct task_struct *p)
 	unsigned int slave = p->wakee_flips;
 	int factor = this_cpu_read(sd_llc_size);
 
-	/*
-	 * If we've balanced this task recently we don't want to undo all of
-	 * that hard work by the load balancer and move it to the current cpu.
-	 * Constantly overriding the load balancers decisions is going to make
-	 * it question its purpose in life and give it anxiety and self worth
-	 * issues, and nobody wants that.
-	 */
-	if (time_before(jiffies, p->last_balance_ts + HZ)) {
-		trace_printk("wake wide due to last_balance_ts");
-		return 1;
-	}
-
 	if (master < slave)
 		swap(master, slave);
 	if (slave < factor || master < slave * factor)
@@ -6896,9 +6884,6 @@ static int detach_tasks(struct lb_env *env)
 			goto next;
 
 		detach_task(p, env);
-		p->last_balance_ts = jiffies;
-		trace_printk("last_balance_ts: pid=%d comm=%s jiffies=%lu",
-			     p->pid, p->comm, p->last_balance_ts);
 		list_add(&p->se.group_node, &env->tasks);
 
 		detached++;

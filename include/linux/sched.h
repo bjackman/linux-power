@@ -550,7 +550,6 @@ struct task_struct {
 	unsigned long			wakee_flip_decay_ts;
 	struct task_struct		*last_wakee;
 
-	unsigned long			last_balance_ts;
 	int				wake_cpu;
 #endif
 	int				on_rq;
