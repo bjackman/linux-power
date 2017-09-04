@@ -7016,6 +7016,16 @@ static void attach_tasks(struct lb_env *env)
 	rq_unlock(env->dst_rq, &rf);
 }
 
+#ifdef CONFIG_NO_HZ_COMMON
+static struct {
+	cpumask_var_t idle_cpus_mask;
+	atomic_t nr_cpus;
+	cpumask_var_t stats_update_cpus;
+	unsigned long next_balance;     /* in jiffy units */
+	unsigned long next_update;     /* in jiffy units */
+} nohz ____cacheline_aligned;
+#endif
+
 #ifdef CONFIG_FAIR_GROUP_SCHED
 
 static inline bool cfs_rq_is_decayed(struct cfs_rq *cfs_rq)
@@ -7070,8 +7080,16 @@ static void update_blocked_averages(int cpu)
 		if (cfs_rq_is_decayed(cfs_rq))
 			list_del_leaf_cfs_rq(cfs_rq);
 	}
-	rq_unlock_irqrestore(rq, &rf);
-}
+
+	/*
+	 * If the root cfs_rq has decayed completely (so we just did
+	 * list_del_leaf_cfs_rq on it), we don't need to keep updating its stats
+	 * any more.
+	 */
+	if (!rq->cfs.on_list)
+		cpumask_clear_cpu(cpu, nohz.stats_update_cpus);
+
+	rq_unlock_irqrestore(rq, &rf); }
 
 /*
  * Compute the hierarchical load factor for cfs_rq and all its ascendants.
@@ -8448,15 +8466,6 @@ update_next_balance(struct sched_domain *sd, unsigned long *next_balance)
 		*next_balance = next;
 }
 
-#ifdef CONFIG_NO_HZ_COMMON
-static struct {
-	cpumask_var_t idle_cpus_mask;
-	atomic_t nr_cpus;
-	unsigned long next_balance;     /* in jiffy units */
-	unsigned long next_update;     /* in jiffy units */
-} nohz ____cacheline_aligned;
-#endif
-
 /*
  * idle_balance is called by schedule() if this_cpu is about to become
  * idle. Attempts to pull tasks from other CPUs.
@@ -8503,7 +8512,7 @@ static int idle_balance(struct rq *this_rq, struct rq_flags *rf)
 
 #ifdef CONFIG_NO_HZ_COMMON
 	t0 = sched_clock_cpu(this_cpu);
-	for_each_cpu(cpu, nohz.idle_cpus_mask) {
+	for_each_cpu(cpu, nohz.stats_update_cpus) {
 		if (cpu == this_cpu)
 			continue;
 		update_blocked_averages(cpu);
@@ -8745,6 +8754,7 @@ void nohz_balance_exit_idle(unsigned int cpu)
 		 */
 		if (likely(cpumask_test_cpu(cpu, nohz.idle_cpus_mask))) {
 			cpumask_clear_cpu(cpu, nohz.idle_cpus_mask);
+			cpumask_clear_cpu(cpu, nohz.stats_update_cpus);
 			atomic_dec(&nohz.nr_cpus);
 		}
 		clear_bit(NOHZ_TICK_STOPPED, nohz_flags(cpu));
@@ -8811,6 +8821,7 @@ void nohz_balance_enter_idle(int cpu)
 		return;
 
 	cpumask_set_cpu(cpu, nohz.idle_cpus_mask);
+	cpumask_set_cpu(cpu, nohz.stats_update_cpus);
 	atomic_inc(&nohz.nr_cpus);
 	set_bit(NOHZ_TICK_STOPPED, nohz_flags(cpu));
 }
@@ -8963,6 +8974,7 @@ static void nohz_idle_balance(struct rq *this_rq, enum cpu_idle_type idle)
 	/* Earliest time when we have to do rebalance again */
 	unsigned long next_balance = jiffies + 60*HZ;
 	int update_next_balance = 0;
+	struct cpumask *cpus;
 
 	if (idle != CPU_IDLE ||
 	    !test_bit(NOHZ_BALANCE_KICK, nohz_flags(this_cpu)))
@@ -8993,10 +9005,14 @@ static void nohz_idle_balance(struct rq *this_rq, enum cpu_idle_type idle)
 	 * undefined state to the load balance will be aborted just after the
 	 * update of blocked load
 	 */
-	if (test_bit(NOHZ_STATS_KICK, nohz_flags(this_cpu)))
+	if (test_bit(NOHZ_STATS_KICK, nohz_flags(this_cpu))) {
 		idle = CPU_MAX_IDLE_TYPES;
+		cpus = nohz.idle_cpus_mask;
+	} else {
+		cpus = nohz.stats_update_cpus;
+	}
 
-	for_each_cpu(balance_cpu, nohz.idle_cpus_mask) {
+	for_each_cpu(balance_cpu, cpus) {
 		if (balance_cpu == this_cpu || !idle_cpu(balance_cpu))
 			continue;
 
@@ -9081,7 +9097,8 @@ static inline int nohz_kick_needed(struct rq *rq)
 	if (likely(!atomic_read(&nohz.nr_cpus)))
 		return 0;
 
-	if (time_after_eq(now, nohz.next_update))
+	if (time_after_eq(now, nohz.next_update) &&
+	    !cpumask_empty(nohz.stats_update_cpus))
 		ret = NOHZ_STATS_KICK;
 
 	if (only_update_stats || time_before(now, nohz.next_balance))
@@ -9757,6 +9774,7 @@ __init void init_sched_fair_class(void)
 	nohz.next_balance = jiffies;
 	nohz.next_update = jiffies;
 	zalloc_cpumask_var(&nohz.idle_cpus_mask, GFP_NOWAIT);
+	zalloc_cpumask_var(&nohz.stats_update_cpus, GFP_NOWAIT);
 #endif
 #endif /* SMP */
 
