@@ -8683,6 +8683,9 @@ static void nohz_balancer_kick(void)
 
 	if (test_and_set_bit(NOHZ_BALANCE_KICK, nohz_flags(ilb_cpu)))
 		return;
+
+	trace_printk("nohz_kick: ilb_cpu=%d only_update=0", ilb_cpu);
+
 	/*
 	 * Use smp_send_reschedule() instead of resched_cpu().
 	 * This way we generate a sched IPI on the target cpu which
