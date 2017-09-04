@@ -8510,7 +8510,7 @@ static int idle_balance(struct rq *this_rq, struct rq_flags *rf)
 
 	}
 	curr_cost += sched_clock_cpu(this_cpu) - t0;
-	nohz.next_update = jiffies + msecs_to_jiffies(LOAD_BALANCE_PERIOD);
+	nohz.next_update = jiffies + msecs_to_jiffies(LOAD_AVG_PERIOD);
 	trace_printk("nohz_next_update: from=idle_balance now=%ld next_update=%ld",
 		     jiffies, nohz.next_update);
 #endif
@@ -8982,7 +8982,7 @@ static void nohz_idle_balance(struct rq *this_rq, enum cpu_idle_type idle)
 	 * sequence will quickly be aborted as there is no more idle CPUs
 	 */
 	if (sd)
-		nohz.next_update = jiffies + get_sd_balance_interval(sd, true)/4;
+		nohz.next_update = jiffies + msecs_to_jiffies(LOAD_AVG_PERIOD);
 	trace_printk("nohz_next_update: from=nohz_idle_balance now=%ld next_update=%ld",
 		     jiffies, nohz.next_update);
 	rcu_read_unlock();
