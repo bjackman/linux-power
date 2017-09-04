@@ -5989,7 +5989,7 @@ static int wake_cap(struct task_struct *p, int cpu, int prev_cpu)
 	return min_cap * 1024 < task_util(p) * capacity_margin;
 }
 
-static inline bool nohz_kick_needed(struct rq *rq, bool only_update);
+static inline int nohz_kick_needed(struct rq *rq);
 static void nohz_balancer_kick(bool only_update);
 
 /*
@@ -6089,11 +6089,6 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int sd_flag, int wake_f
 		/* while loop will break here if sd == NULL */
 	}
 	rcu_read_unlock();
-
-#ifdef CONFIG_NO_HZ_COMMON
-        if (nohz_kick_needed(cpu_rq(new_cpu), true))
-		nohz_balancer_kick(true);
-#endif
 
 	return new_cpu;
 }
@@ -9021,43 +9016,42 @@ end:
  *   - For SD_ASYM_PACKING, if the lower numbered cpu's in the scheduler
  *     domain span are idle.
  */
-static inline bool nohz_kick_needed(struct rq *rq, bool only_update)
+static inline int nohz_kick_needed(struct rq *rq)
 {
 	unsigned long now = jiffies;
 	struct sched_domain_shared *sds;
 	struct sched_domain *sd;
 	int nr_busy, i, cpu = rq->cpu;
-	bool kick = false;
+	int ret = 0;
+	bool only_update_stats = false;
 
-	if (unlikely(rq->idle_balance) && !only_update)
-		return false;
-
-       /*
-	* We may be recently in ticked or tickless idle mode. At the first
-	* busy tick after returning from idle, we will update the busy stats.
-	*/
-	set_cpu_sd_state_busy();
-	nohz_balance_exit_idle(cpu);
+	if (unlikely(rq->idle_balance)) {
+		only_update_stats = true;
+	} else {
+		/*
+		 * We may be recently in ticked or tickless idle mode. At the
+		 * first busy tick after returning from idle, we will update the
+		 * busy stats.
+		 */
+		set_cpu_sd_state_busy();
+		nohz_balance_exit_idle(cpu);
+	}
 
 	/*
 	 * None are in tickless mode and hence no need for NOHZ idle load
-	 * balancing.
+	 * balancing or stats updates.
 	 */
 	if (likely(!atomic_read(&nohz.nr_cpus)))
-		return false;
+		return 0;
 
-	if (only_update) {
-		if (time_before(now, nohz.next_update))
-			return false;
-		else
-			return true;
-	}
+	if (time_after_eq(now, nohz.next_update))
+		ret = NOHZ_STATS_KICK;
 
-	if (time_before(now, nohz.next_balance))
-		return false;
+	if (only_update_stats || time_before(now, nohz.next_balance))
+		return ret;
 
 	if (rq->nr_running >= 2)
-		return true;
+		return NOHZ_BALANCE_KICK;
 
 	rcu_read_lock();
 	sds = rcu_dereference(per_cpu(sd_llc_shared, cpu));
@@ -9068,7 +9062,7 @@ static inline bool nohz_kick_needed(struct rq *rq, bool only_update)
 		 */
 		nr_busy = atomic_read(&sds->nr_busy_cpus);
 		if (nr_busy > 1) {
-			kick = true;
+			ret = NOHZ_BALANCE_KICK;
 			goto unlock;
 		}
 
@@ -9078,7 +9072,7 @@ static inline bool nohz_kick_needed(struct rq *rq, bool only_update)
 	if (sd) {
 		if ((rq->cfs.h_nr_running >= 1) &&
 				check_cpu_capacity(rq, sd)) {
-			kick = true;
+			ret = NOHZ_BALANCE_KICK;
 			goto unlock;
 		}
 	}
@@ -9091,14 +9085,14 @@ static inline bool nohz_kick_needed(struct rq *rq, bool only_update)
 				continue;
 
 			if (sched_asym_prefer(i, cpu)) {
-				kick = true;
+				ret = NOHZ_BALANCE_KICK;
 				goto unlock;
 			}
 		}
 	}
 unlock:
 	rcu_read_unlock();
-	return kick;
+	return ret;
 }
 #else
 static void nohz_idle_balance(struct rq *this_rq, enum cpu_idle_type idle) { }
@@ -9135,6 +9129,8 @@ static __latent_entropy void run_rebalance_domains(struct softirq_action *h)
  */
 void trigger_load_balance(struct rq *rq)
 {
+	int kick;
+
 	/* Don't need to rebalance while attached to NULL domain */
 	if (unlikely(on_null_domain(rq)))
 		return;
@@ -9142,8 +9138,8 @@ void trigger_load_balance(struct rq *rq)
 	if (time_after_eq(jiffies, rq->next_balance))
 		raise_softirq(SCHED_SOFTIRQ);
 #ifdef CONFIG_NO_HZ_COMMON
-	if (nohz_kick_needed(rq, false))
-		nohz_balancer_kick(false);
+	if ((kick = nohz_kick_needed(rq)) != 0)
+		nohz_balancer_kick(kick == NOHZ_STATS_KICK);
 #endif
 }
 
