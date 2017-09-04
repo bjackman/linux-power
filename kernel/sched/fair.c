@@ -8448,6 +8448,15 @@ update_next_balance(struct sched_domain *sd, unsigned long *next_balance)
 		*next_balance = next;
 }
 
+#ifdef CONFIG_NO_HZ_COMMON
+static struct {
+	cpumask_var_t idle_cpus_mask;
+	atomic_t nr_cpus;
+	unsigned long next_balance;     /* in jiffy units */
+	unsigned long next_update;     /* in jiffy units */
+} nohz ____cacheline_aligned;
+#endif
+
 /*
  * idle_balance is called by schedule() if this_cpu is about to become
  * idle. Attempts to pull tasks from other CPUs.
@@ -8455,10 +8464,11 @@ update_next_balance(struct sched_domain *sd, unsigned long *next_balance)
 static int idle_balance(struct rq *this_rq, struct rq_flags *rf)
 {
 	unsigned long next_balance = jiffies + HZ;
-	int this_cpu = this_rq->cpu;
+	int cpu, this_cpu = this_rq->cpu;
 	struct sched_domain *sd;
 	int pulled_task = 0;
 	u64 curr_cost = 0;
+	u64 t0;
 
 	/*
 	 * We must set idle_stamp _before_ calling idle_balance(), such that we
@@ -8474,8 +8484,7 @@ static int idle_balance(struct rq *this_rq, struct rq_flags *rf)
 	 */
 	rq_unpin_lock(this_rq, rf);
 
-	if (this_rq->avg_idle < sysctl_sched_migration_cost ||
-	    !this_rq->rd->overload) {
+	if (this_rq->avg_idle < sysctl_sched_migration_cost) {
 		rcu_read_lock();
 		sd = rcu_dereference_check_sched_domain(this_rq->sd);
 		if (sd)
@@ -8485,13 +8494,45 @@ static int idle_balance(struct rq *this_rq, struct rq_flags *rf)
 		goto out;
 	}
 
+	/*
+	 * TODO: Why do we keep the rq lock up until now?
+	 *       Is it OK that we now release and re-acquire in the case of
+	 *       !overload?
+	 */
 	raw_spin_unlock(&this_rq->lock);
+
+#ifdef CONFIG_NO_HZ_COMMON
+	t0 = sched_clock_cpu(this_cpu);
+	for_each_cpu(cpu, nohz.idle_cpus_mask) {
+		if (cpu == this_cpu)
+			continue;
+		update_blocked_averages(cpu);
+
+	}
+	curr_cost += sched_clock_cpu(this_cpu) - t0;
+	nohz.next_update = jiffies + msecs_to_jiffies(LOAD_BALANCE_PERIOD);
+	trace_printk("nohz_next_update: from=idle_balance now=%ld next_update=%ld",
+		     jiffies, nohz.next_update);
+#endif
+
+	/* TODO: avoid this code duplication */
+	if (!this_rq->rd->overload) {
+		rcu_read_lock();
+		sd = rcu_dereference_check_sched_domain(this_rq->sd);
+		if (sd)
+			update_next_balance(sd, &next_balance);
+		rcu_read_unlock();
+
+		raw_spin_lock(&this_rq->lock);
+
+		goto out;
+	}
 
 	update_blocked_averages(this_cpu);
 	rcu_read_lock();
 	for_each_domain(this_cpu, sd) {
 		int continue_balancing = 1;
-		u64 t0, domain_cost;
+		u64 domain_cost;
 
 		if (!(sd->flags & SD_LOAD_BALANCE))
 			continue;
@@ -8652,12 +8693,6 @@ static inline int on_null_domain(struct rq *rq)
  *   needed, they will kick the idle load balancer, which then does idle
  *   load balancing for all the idle CPUs.
  */
-static struct {
-	cpumask_var_t idle_cpus_mask;
-	atomic_t nr_cpus;
-	unsigned long next_balance;     /* in jiffy units */
-	unsigned long next_update;     /* in jiffy units */
-} nohz ____cacheline_aligned;
 
 static inline int find_new_ilb(void)
 {
@@ -8948,6 +8983,8 @@ static void nohz_idle_balance(struct rq *this_rq, enum cpu_idle_type idle)
 	 */
 	if (sd)
 		nohz.next_update = jiffies + get_sd_balance_interval(sd, true)/4;
+	trace_printk("nohz_next_update: from=nohz_idle_balance now=%ld next_update=%ld",
+		     jiffies, nohz.next_update);
 	rcu_read_unlock();
 
 	/*
