@@ -7086,8 +7086,11 @@ static void update_blocked_averages(int cpu)
 	 * list_del_leaf_cfs_rq on it), we don't need to keep updating its stats
 	 * any more.
 	 */
-	if (!rq->cfs.on_list)
+	if (!rq->cfs.on_list) {
 		cpumask_clear_cpu(cpu, nohz.stats_update_cpus);
+		trace_printk("stats_update_cpus: cpus=0x%lx from=%s",
+			     *cpumask_bits(nohz.stats_update_cpus), __FUNCTION__);
+	}
 
 	rq_unlock_irqrestore(rq, &rf); }
 
@@ -8755,6 +8758,8 @@ void nohz_balance_exit_idle(unsigned int cpu)
 		if (likely(cpumask_test_cpu(cpu, nohz.idle_cpus_mask))) {
 			cpumask_clear_cpu(cpu, nohz.idle_cpus_mask);
 			cpumask_clear_cpu(cpu, nohz.stats_update_cpus);
+			trace_printk("stats_update_cpus: cpus=0x%lx from=%s",
+				     *cpumask_bits(nohz.stats_update_cpus), __FUNCTION__);
 			atomic_dec(&nohz.nr_cpus);
 		}
 		clear_bit(NOHZ_TICK_STOPPED, nohz_flags(cpu));
@@ -8822,6 +8827,8 @@ void nohz_balance_enter_idle(int cpu)
 
 	cpumask_set_cpu(cpu, nohz.idle_cpus_mask);
 	cpumask_set_cpu(cpu, nohz.stats_update_cpus);
+	trace_printk("stats_update_cpus: cpus=0x%lx from=%s",
+		     *cpumask_bits(nohz.stats_update_cpus), __FUNCTION__);
 	atomic_inc(&nohz.nr_cpus);
 	set_bit(NOHZ_TICK_STOPPED, nohz_flags(cpu));
 }
