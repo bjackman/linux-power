@@ -8974,7 +8974,6 @@ static void nohz_idle_balance(struct rq *this_rq, enum cpu_idle_type idle)
 	/* Earliest time when we have to do rebalance again */
 	unsigned long next_balance = jiffies + 60*HZ;
 	int update_next_balance = 0;
-	int updated = 0;
 	struct cpumask *cpus;
 
 	if (idle != CPU_IDLE ||
@@ -9040,8 +9039,6 @@ static void nohz_idle_balance(struct rq *this_rq, enum cpu_idle_type idle)
 			rq_unlock_irq(rq, &rf);
 
 			rebalance_domains(rq, idle);
-
-			updated++;
 		}
 
 		if (time_after(next_balance, rq->next_balance)) {
@@ -9050,8 +9047,6 @@ static void nohz_idle_balance(struct rq *this_rq, enum cpu_idle_type idle)
 		}
 	}
 
-	if (!updated)
-		printk("DID NOT UPDATE ANYBODY");
 	/*
 	 * next_balance will be updated only when there is a need.
 	 * When the CPU is attached to null domain for ex, it will not be
